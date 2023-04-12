@@ -28,6 +28,7 @@ const int gsi_is_parallel = 1;
 typedef struct {
         int thread_id;
         pthread_t thread;
+		int pad[6]; /* Pad to 64 bytes */
 
         double error;
 
@@ -71,7 +72,12 @@ gsi_init()
         global_error = gs_tolerance + 1;
 
         /* TASK: Initialize global variables here */
-		flag_array = (_Atomic int *) malloc(gs_size * gs_nthreads * sizeof(int));
+		flag_array = (_Atomic int *) malloc(gs_size * gs_nthreads * sizeof(_Atomic int));
+
+		// Fill flag array with 0
+		for (int i = 0; i < gs_size * gs_nthreads; i++) {
+			flag_array[i] = 0;
+		}
 
 		if (pthread_barrier_init(&barrier, NULL, gs_nthreads) != 0) {
 			fprintf(stderr, "Failed to initialize barrier\n");
@@ -149,8 +155,9 @@ thread_compute(void *_self)
         int lbound, rbound;
 
         /* TASK: Compute bounds for this thread */
-		lbound = tid * (gs_size / gs_nthreads);
-		rbound = (tid + 1) * (gs_size / gs_nthreads);
+
+		lbound = 1 + tid * (gs_size - 2) / gs_nthreads;
+		rbound = 1 + (tid + 1) * (gs_size - 2) / gs_nthreads;
 		dprintf("gs_size: %i, tid: %i, lbound: %i, rbound: %i\n", gs_size, tid, lbound, rbound);
 
         gs_verbose_printf("%i: lbound: %i, rbound: %i\n",
@@ -171,21 +178,24 @@ thread_compute(void *_self)
                  * sweep last? */
 				if (tid == gs_nthreads - 1) {
 					global_error = 0.0;
+
 					for (int i = 0; i < gs_nthreads; i++) {
 						global_error += threads[i].error;
 					}
 					dprintf("%d: global error: %f", tid, global_error);
+
+					// reset flag array
+					for (int i = 0; i < gs_size * gs_nthreads; i++) {
+						flag_array[i] = 0;
+					}
 				}
 
-                printf("%d: iteration %d done\n", tid, iter);
+                dprintf("%d: iteration %d done\n", tid, iter);
 
                 /* TASK: Iteration barrier */
 				pthread_barrier_wait(&barrier);
 
-				// reset flag array
-				for (int i = 0; i < gs_size; i++) {
-					flag_array[i * gs_nthreads + tid] = 0;
-				}
+
         }
 
         gs_verbose_printf(
